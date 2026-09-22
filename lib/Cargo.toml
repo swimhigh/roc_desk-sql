@@ -4,12 +4,40 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-roc_desk_core = { git = "https://github.com/swimhigh/roc_desk-common", package = "roc_desk_core", tag = "common-v0.2.6" }
+roc_desk_core = { git = "https://github.com/swimhigh/roc_desk-common", package = "roc_desk_core", tag = "common-v0.3.1" }
+tauri = { version = "2" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "process"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+async-trait = "0.1"
+rusqlite = { version = "0.39", features = ["bundled"] }
+r2d2 = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-util = "0.3"
+sqlparser = "0.52"
+
+mysql_async = { version = "0.37", default-features = false, features = [
+    "default-rustls-ring",
+    "chrono",
+] }
+
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1", "with-serde_json-1"] }
+tokio-postgres-rustls = "0.14"
+deadpool-postgres = "0.14"
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+rustls-native-certs = "0.8"
+
+tiberius = { version = "0.12", default-features = false, features = [
+    "rustls",
+    "chrono",
+    "tds73",
+] }
+bb8 = "0.9"
+bb8-tiberius = { version = "0.16", default-features = false, features = ["with-tokio"] }
 
 [features]
-default = []
+default = ["business"]
 business = []
-
-
-
-
