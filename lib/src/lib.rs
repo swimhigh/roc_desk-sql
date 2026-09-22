@@ -30,8 +30,9 @@
 //!   that AI infrastructure has a home in `roc_desk_core`.
 
 pub mod credential;
-pub mod db;
 pub mod error;
+#[cfg(feature = "business")]
+pub mod db;
 #[cfg(feature = "business")]
 pub mod sql;
 
