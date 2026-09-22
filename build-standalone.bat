@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 echo Building roc_desk-sql (Release)...
-cargo build --release -p roc_desk_sql_standalone
+cargo build --release --features custom-protocol -p roc_desk_sql_standalone
 if errorlevel 1 (
   echo BUILD FAILED: roc_desk-sql
   exit /b 1
