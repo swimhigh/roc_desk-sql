@@ -1,0 +1,433 @@
+/* ===========================================================================
+ * 设计令牌部分——原样摘自 roc_desk-common/packages/ui-core/src/styles/theme.css
+ * （与 UI_DESIGN.md §二"设计令牌"一一对应），plain npm 目前没有可行路径把
+ * ui-core 当依赖引用（见 docs/MULTI_REPO_SPLIT_PROGRESS.md 的说明），这里
+ * 直接复制源码当起点，不是拍脑袋抄一份不同的配色。
+ * ======================================================================== */
+
+:root {
+  --font-ui: "Inter", "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Consolas", "Courier New", monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-full: 9999px;
+
+  --list-row-height: 28px;
+
+  --transition-duration: 200ms;
+  --transition-easing: ease-out;
+}
+
+/* 深色主题（默认） */
+:root,
+[data-theme="dark"] {
+  --bg-app: #1e1f22;
+  --bg-surface: #26282c;
+  --bg-surface-raised: #2f3136;
+  --bg-hover: #33353a;
+  --bg-selected: #3a4a63;
+  --border-default: #3a3c41;
+  --border-subtle: #2d2f33;
+  --text-primary: #e6e6e6;
+  --text-secondary: #9a9ca1;
+  --text-disabled: #5c5e63;
+  --accent: #4f8cff;
+  --accent-dim: rgba(79, 140, 255, 0.15);
+  --success: #3fb950;
+  --warning: #d9a441;
+  --danger: #e5534b;
+  --info: #58a6ff;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 浅色主题 */
+[data-theme="light"] {
+  --bg-app: #f5f5f7;
+  --bg-surface: #ffffff;
+  --bg-surface-raised: #ffffff;
+  --bg-hover: #eceef1;
+  --bg-selected: #dbe7fb;
+  --border-default: #e2e4e8;
+  --border-subtle: #eeef1;
+  --text-primary: #1b1c1e;
+  --text-secondary: #6b6d72;
+  --text-disabled: #b0b2b6;
+  --accent: #3568e0;
+  --accent-dim: rgba(53, 104, 224, 0.12);
+  --success: #2a9d3f;
+  --warning: #b8860b;
+  --danger: #cc3b33;
+  --info: #3568e0;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===========================================================================
+ * 通用组件类名——摘自 core.css（按钮/弹窗/Toast/右键菜单/表单/工具栏），
+ * 依赖上面的设计令牌。
+ * ======================================================================== */
+
+.btn {
+  height: 32px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--bg-surface-raised);
+  color: var(--text-primary);
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.btn.sm { height: 24px; padding: 0 var(--space-3); font-size: var(--text-xs); }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.primary:hover { opacity: 0.9; }
+.btn.ghost { border: 1px solid var(--border-default); color: var(--text-secondary); background: transparent; }
+.btn.ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+.btn.ghost.active { background: var(--bg-selected); color: var(--accent); border-color: var(--accent); }
+.btn.success { background: var(--success); color: #000; }
+.btn.danger { background: var(--danger); color: #fff; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* === Dialog（ConfirmDialog 的基座，也是 TableDataDialog/TransferDialog 用的弹窗外壳） === */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  min-width: 380px;
+  max-width: 480px;
+  background: var(--bg-surface-raised);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.dialog-title-bar {
+  padding: var(--space-4) var(--space-4) var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.dialog-title-bar.info { color: var(--info); }
+.dialog-title-bar.warning { color: var(--warning); }
+.dialog-title-bar.danger { background: var(--danger); color: #fff; }
+.dialog-body {
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+.dialog-actions {
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* === Toast === */
+.toast {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  box-shadow: var(--shadow);
+  max-width: 360px;
+  cursor: pointer;
+}
+.toast.success { background: rgba(63, 185, 80, 0.15); border: 1px solid var(--success); color: var(--success); }
+.toast.info { background: rgba(88, 166, 255, 0.15); border: 1px solid var(--info); color: var(--info); }
+.toast.error { background: rgba(229, 83, 75, 0.15); border: 1px solid var(--danger); color: var(--danger); }
+.toast-stack {
+  position: fixed;
+  bottom: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  z-index: 2000;
+}
+
+/* === Context Menu === */
+.context-menu {
+  min-width: 180px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  padding: 4px 0;
+  z-index: 2000;
+  font-size: var(--text-sm);
+}
+.context-menu-item { padding: 5px 14px; cursor: pointer; color: var(--text-primary); }
+.context-menu-item:hover { background: var(--bg-hover); }
+.context-menu-item.danger { color: var(--danger); }
+.context-menu-item.danger:hover { background: rgba(229, 83, 75, 0.1); }
+.context-menu-sep { height: 1px; background: var(--border-subtle); margin: 4px 0; }
+
+/* === Form input（数据源表单、导出导入弹窗共用） === */
+.form { display: flex; flex-direction: column; gap: var(--space-3); }
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row.split { flex-direction: row; gap: var(--space-2); }
+.form-row.split > * { flex: 1; }
+.form-label { font-size: var(--text-xs); color: var(--text-secondary); }
+.form-input, .form-select {
+  height: 30px;
+  padding: 0 var(--space-2);
+  background: var(--bg-app);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+}
+.form-input:focus, .form-select:focus { border-color: var(--accent); }
+.form-input-group { display: flex; gap: var(--space-1); }
+.form-input-group .form-input { flex: 1; }
+.form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+
+/* === 对象树（ObjectExplorer 复用文件树同款类名） === */
+.project-tree {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+  user-select: none;
+}
+.tree-item {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tree-item:hover { background: var(--bg-hover); }
+.tree-item.active { background: var(--bg-selected); }
+
+/* === Tab bar（工具窗口顶部） === */
+.tab-bar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+  padding-left: var(--space-2);
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.tab-bar .app-icon { width: 18px; height: 18px; color: var(--accent); flex-shrink: 0; }
+.workspace-name-btn {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-right: var(--space-2);
+  flex-shrink: 0;
+}
+.workspace-name-btn:hover { background: var(--bg-hover); }
+
+/* === 工具栏图标按钮（ThemeToggle 等） === */
+.quick-tool-btn {
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.quick-tool-btn svg { width: 16px; height: 16px; }
+.quick-tool-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.quick-tool-btn.active { background: var(--bg-selected); color: var(--accent); }
+.quick-tool-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.quick-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; padding: 0 var(--space-2); }
+
+/* 弹窗右上角小号关闭/操作按钮（TableDataDialog/TransferDialog/ResultPanel 用） */
+.icon-btn {
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.icon-btn svg { width: 15px; height: 15px; }
+
+.spin { animation: spin 0.8s linear infinite; }
+
+/* === 空状态提示 === */
+.empty-state { text-align: center; padding: var(--space-8); color: var(--text-secondary); }
+
+/* === 数据源列表行（DataSourceManager 复用双栏文件浏览器的 file-row 类名） === */
+.file-row {
+  display: grid;
+  grid-template-columns: 2fr 100px 140px;
+  align-items: center;
+  height: var(--list-row-height);
+  padding: 0 var(--space-3);
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.file-row:hover { background: var(--bg-hover); }
+
+/* === SQL 编辑器多标签页（SqlEditorTabs） === */
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 6px 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  border-right: 1px solid var(--border-subtle);
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+  position: relative;
+}
+.editor-tab:hover { color: var(--text-primary); }
+.editor-tab.active {
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+.editor-tab.active::after {
+  content: "";
+  position: absolute;
+  top: -1px; left: 0; right: 0;
+  height: 2px;
+  background: var(--accent);
+}
+.editor-tab-close {
+  width: 18px; height: 18px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  opacity: 0;
+}
+.editor-tab-close svg { width: 12px; height: 12px; }
+.editor-tab:hover .editor-tab-close,
+.editor-tab.active .editor-tab-close { opacity: 1; }
+.editor-tab-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* === SegmentedControl（TableDataDialog 的"数据/结构"切换） === */
+.segmented {
+  display: flex;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.segmented .seg-btn {
+  flex: 1;
+  height: 26px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.segmented .seg-btn.active { background: var(--bg-selected); color: var(--accent); }
+
+/* === SQL 执行结果表格（ResultPanel/ResultTableView） === */
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.result-table { border-collapse: collapse; font-size: var(--text-sm); width: 100%; }
+.result-table th, .result-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  white-space: nowrap;
+}
+.result-table th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-default);
+  cursor: pointer;
+}
+.result-table tr:hover td { background: var(--bg-hover); }
+.result-table td.cell-null { color: var(--text-secondary); font-style: italic; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}

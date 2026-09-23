@@ -6,8 +6,6 @@ import type {
   DbInfo,
   ExecuteOutcome,
   ExecuteResult,
-  FileChange,
-  FileSyncInfo,
   NamedCell,
   ObjectDefinition,
   ObjectPage,
@@ -19,7 +17,10 @@ import type {
   WorkspaceTab,
 } from "../types/bindings";
 
-/** IPC 边界（docs/SQL_DESKTOP_PLAN.md）：SQL 桌面模块的数据源/会话/执行/AI。 */
+/** IPC 边界：SQL 桌面模块的数据源/会话/执行。AI 相关命令
+ * （`sql_ai_*`/`sql_accept_change`/`sql_reject_change`/`sql_undo_change`/
+ * `sql_revert_turn`）后端没有实现（待 core::ai 落地后跟进），这里故意不提供
+ * 对应方法，避免前端调用到不存在的 Tauri command。 */
 export const sqlService = {
   previewTemplate(dataSourceId: string, object: ObjectRef): Promise<string> {
     return invoke("sql_preview_template", { dataSourceId, object });
@@ -104,53 +105,6 @@ export const sqlService = {
   },
   writeTabContent(dataSourceId: string, tabId: string, content: string): Promise<void> {
     return invoke("sql_tab_write_content", { dataSourceId, tabId, content });
-  },
-
-  aiGenerate(
-    dataSourceId: string,
-    tabId: string,
-    providerId: string,
-    instruction: string,
-    schemaContext: string,
-    currentSql: string,
-  ): Promise<FileChange> {
-    return invoke("sql_ai_generate", { dataSourceId, tabId, providerId, instruction, schemaContext, currentSql });
-  },
-  aiExplain(providerId: string, sql: string, schemaContext: string): Promise<string> {
-    return invoke("sql_ai_explain", { providerId, sql, schemaContext });
-  },
-  aiOptimize(
-    dataSourceId: string,
-    tabId: string,
-    providerId: string,
-    sql: string,
-    explainOutput: string | null,
-    schemaContext: string,
-  ): Promise<FileChange> {
-    return invoke("sql_ai_optimize", { dataSourceId, tabId, providerId, sql, explainOutput, schemaContext });
-  },
-  aiFixError(
-    dataSourceId: string,
-    tabId: string,
-    providerId: string,
-    sql: string,
-    errorMessage: string,
-    schemaContext: string,
-  ): Promise<FileChange> {
-    return invoke("sql_ai_fix_error", { dataSourceId, tabId, providerId, sql, errorMessage, schemaContext });
-  },
-
-  acceptChange(dataSourceId: string, changeId: string): Promise<FileSyncInfo> {
-    return invoke("sql_accept_change", { dataSourceId, changeId });
-  },
-  rejectChange(dataSourceId: string, changeId: string): Promise<void> {
-    return invoke("sql_reject_change", { dataSourceId, changeId });
-  },
-  undoChange(dataSourceId: string, changeId: string): Promise<FileSyncInfo> {
-    return invoke("sql_undo_change", { dataSourceId, changeId });
-  },
-  revertTurn(dataSourceId: string, turnId: string): Promise<FileSyncInfo[]> {
-    return invoke("sql_revert_turn", { dataSourceId, turnId });
   },
 
   tablePage(dataSourceId: string, object: ObjectRef, limit: number, offset: number): Promise<ExecuteResult> {

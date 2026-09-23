@@ -7,6 +7,7 @@ build = "build.rs"
 [dependencies]
 roc_desk_sql = { path = "../lib" }
 tauri = { version = "2", features = ["wry"] }
+tauri-plugin-dialog = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

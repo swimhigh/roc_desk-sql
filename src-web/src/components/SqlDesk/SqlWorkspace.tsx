@@ -4,7 +4,6 @@ import { useSqlStore } from "../../stores/sqlStore";
 import { ObjectExplorer } from "./ObjectExplorer";
 import { SqlEditorTabs } from "./SqlEditorTabs";
 import { ResultPanel } from "./ResultPanel/ResultPanel";
-import { SqlAgentPanel } from "./SqlAgentPanel";
 import { TableDataDialog } from "./TableDataDialog";
 import { TransferDialog } from "./TransferDialog";
 import type { DataSourceProfile, ObjectRef } from "../../types/bindings";
@@ -14,18 +13,17 @@ interface SqlWorkspaceProps {
   dataSource: DataSourceProfile;
 }
 
-/** SQL 工作区三栏布局（docs/SQL_DESKTOP_PLAN.md §3.3）：对象浏览器 | SQL
- * 标签页编辑器 + 结果区 | AI 工具。列宽固定，不做拖拽调整——控制这一版的
- * 实现规模，后续需要再加。 */
+/** SQL 工作区两栏布局：对象浏览器 | SQL 标签页编辑器 + 结果区。AI 工具面板
+ * （依赖后端未实现的 sql_ai_ 系列/sql_agent_ 系列命令）在这个独立前端里不提供。 */
 export const SqlWorkspace: React.FC<SqlWorkspaceProps> = ({ dataSource }) => {
   const activeTabId = useSqlStore((s) => s.activeTabId);
   const runSql = useSqlStore((s) => s.runSql);
   const cancelQuery = useSqlStore((s) => s.cancelQuery);
 
   const [layout, setLayout] = React.useState(() => {
-    // AI 工具默认收起（2026-09 用户反馈：要和"工作区"模式一样，默认收起、
-    // 要用时再点开——`App.tsx` 里 `aiToolsOpen` 的初始值就是 `false`）。
-    const defaults = { ai: false, tree: true, left: 280, right: 300, result: 40 };
+    // AI 工具面板依赖的 sql_ai_*/sql_agent_* 命令后端未实现（待 core::ai
+    // 落地后跟进），这个独立前端不提供 AI 面板，`layout` 里不再有 `ai` 字段。
+    const defaults = { tree: true, left: 280, right: 300, result: 40 };
     try { return { ...defaults, ...JSON.parse(localStorage.getItem("sql-layout") ?? "{}") }; } catch { return defaults; }
   });
   const [maxResult, setMaxResult] = React.useState(false);
@@ -67,7 +65,6 @@ export const SqlWorkspace: React.FC<SqlWorkspaceProps> = ({ dataSource }) => {
         <button className="btn ghost sm" title="新建一个空白 SQL 查询标签页" onClick={() => void useSqlStore.getState().createTab(`查询 ${useSqlStore.getState().tabs.length + 1}`)}>
           <FilePlus2 size={13} /> 新建 SQL 编辑器
         </button>
-        <button className={`btn ghost sm ${layout.ai ? "active" : ""}`} style={{ marginLeft: "auto" }} onClick={() => setLayout({ ...layout, ai: !layout.ai })}>AI 工具</button>
       </div>
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
       {layout.tree && <><div style={{ width: layout.left, flexShrink: 0, borderRight: "1px solid var(--border-default)", overflow: "hidden" }}>
@@ -91,9 +88,6 @@ export const SqlWorkspace: React.FC<SqlWorkspaceProps> = ({ dataSource }) => {
           <ResultPanel maximized={maxResult} onToggleMaximized={() => setMaxResult(!maxResult)} />
         </div>
       </div>
-      {layout.ai && <><div title="拖动调整 AI 宽度" onPointerDown={resize("right")} style={{ width: 5, cursor: "col-resize", touchAction: "none" }} /><div style={{ width: layout.right, minWidth: 320, maxWidth: 760, flexShrink: 0, borderLeft: "1px solid var(--border-default)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <SqlAgentPanel dataSourceId={dataSource.id} />
-      </div></>}
       </div>
       {viewDataObject && (
         <TableDataDialog

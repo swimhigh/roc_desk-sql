@@ -4,7 +4,6 @@ import type {
   DataSourceInput,
   DataSourceProfile,
   ExecuteResult,
-  FileChange,
   ObjectRef,
   PendingWrite,
   QueryHistoryEntry,
@@ -22,14 +21,6 @@ export interface TabRunState {
   /** DDL 类语句被 `NeedsConfirmation` 挡下后，用户点确认时要重新提交同一段
    * SQL（带上 `confirmed=true`），这里记一份供 `confirmPendingDdl` 使用。 */
   lastSql: string;
-}
-
-/** `FileChange.path`/`FileSyncInfo.path` 是磁盘绝对路径（Windows 下用反斜杠），
- * `WorkspaceTab.file_path` 是存库时统一用正斜杠拼的相对路径
- * （`queries/<tab_id>.sql`，见 `sql::workspace_cache`）——要匹配两者，把绝对
- * 路径的分隔符也归一化成正斜杠再比较，不能反过来处理相对路径那一侧。 */
-export function pathMatchesTab(absPath: string, tabFilePath: string): boolean {
-  return absPath.replace(/\\/g, "/").endsWith(tabFilePath);
 }
 
 const EMPTY_RUN_STATE: TabRunState = {
@@ -70,7 +61,6 @@ interface SqlState {
   clearSelectAllRequest: () => void;
   tabContents: Record<string, string>;
   tabRuns: Record<string, TabRunState>;
-  changesById: Record<string, FileChange>;
   history: QueryHistoryEntry[];
   error: string | null;
 
@@ -102,11 +92,6 @@ interface SqlState {
   rollbackWrite: (tabId: string) => Promise<void>;
 
   loadHistory: () => Promise<void>;
-
-  applyFileChange: (change: FileChange) => void;
-  acceptChange: (changeId: string) => Promise<void>;
-  rejectChange: (changeId: string) => Promise<void>;
-  undoChange: (changeId: string) => Promise<void>;
 }
 
 export const useSqlStore = create<SqlState>((set, get) => ({
@@ -158,7 +143,6 @@ export const useSqlStore = create<SqlState>((set, get) => ({
   clearSelectAllRequest: () => set({ selectAllRequestTabId: null }),
   tabContents: {},
   tabRuns: {},
-  changesById: {},
   history: [],
   error: null,
 
@@ -461,46 +445,6 @@ export const useSqlStore = create<SqlState>((set, get) => ({
       set({ history });
     } catch (e) {
       set({ error: formatError(e) });
-    }
-  },
-
-  applyFileChange: (change) => {
-    set((s) => ({ changesById: { ...s.changesById, [change.id]: change } }));
-  },
-
-  acceptChange: async (changeId) => {
-    const dsId = get().currentDataSourceId;
-    if (!dsId) return;
-    const sync = await sqlService.acceptChange(dsId, changeId);
-    set((s) => ({
-      changesById: { ...s.changesById, [changeId]: { ...s.changesById[changeId], status: "applied" } },
-    }));
-    // 磁盘内容变了，刷新对应标签页的编辑器缓存（找到 file_path 匹配的 tab）。
-    const tab = get().tabs.find((t) => pathMatchesTab(sync.path, t.file_path));
-    if (tab) {
-      set((s) => ({ tabContents: { ...s.tabContents, [tab.id]: sync.content } }));
-    }
-  },
-
-  rejectChange: async (changeId) => {
-    const dsId = get().currentDataSourceId;
-    if (!dsId) return;
-    await sqlService.rejectChange(dsId, changeId);
-    set((s) => ({
-      changesById: { ...s.changesById, [changeId]: { ...s.changesById[changeId], status: "rejected" } },
-    }));
-  },
-
-  undoChange: async (changeId) => {
-    const dsId = get().currentDataSourceId;
-    if (!dsId) return;
-    const sync = await sqlService.undoChange(dsId, changeId);
-    set((s) => ({
-      changesById: { ...s.changesById, [changeId]: { ...s.changesById[changeId], status: "undone" } },
-    }));
-    const tab = get().tabs.find((t) => pathMatchesTab(sync.path, t.file_path));
-    if (tab) {
-      set((s) => ({ tabContents: { ...s.tabContents, [tab.id]: sync.content } }));
     }
   },
 }));
