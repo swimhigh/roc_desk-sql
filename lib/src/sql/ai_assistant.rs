@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use uuid::Uuid;
 
-use crate::ai::chat::AiChatClient;
-use crate::ai::providers::{AiProvider, AiProviderManager};
+use roc_desk_common::ai::{AiChatClient, AiProvider, AiProviderManager};
+
 use crate::error::AppError;
 
 /// SQL 桌面 AI 面板（docs/SQL_DESKTOP_PLAN.md §8）。

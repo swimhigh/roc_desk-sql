@@ -3,7 +3,7 @@ use serde_json::json;
 
 use crate::error::AppError;
 
-pub use crate::coding::tools::{TodoItem, TodoStatus};
+pub use roc_desk_common::agent_todo::{TodoItem, TodoStatus};
 
 /// SQL Agent 的工具集——形状和 `coding::tools::tool_schema()` 完全一样（OpenAI
 /// function-calling 的 `tools` 数组），只是把"文件/命令"换成"SQL 查询/表结构"。

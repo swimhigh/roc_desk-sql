@@ -3,11 +3,11 @@ use sqlparser::ast::Statement;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
+use roc_desk_common::agent_confirm::{CommandConfirmRegistry, QuestionRegistry};
+use roc_desk_common::agent_llm;
+use roc_desk_common::ai::{build_user_message_content, AiProviderManager, ChatAttachment};
+
 use super::tools::{self, TodoItem, ToolCall};
-use crate::agent_llm;
-use crate::ai::AiProviderManager;
-use crate::coding::{CommandConfirmRegistry, QuestionRegistry};
-use crate::coding::ChatAttachment;
 use crate::db::repo::sql_query_history_repo::SqlQueryHistoryRepo;
 use crate::error::AppError;
 use crate::sql::adapter::new_backend_handle_slot;
@@ -120,7 +120,7 @@ impl SqlAgentSession {
         // 消息用的、默认值不同的预算——两个预算数字服务不同的目的，不需要
         // 对齐）。
         let content =
-            crate::coding::session::build_user_message_content(user_text, attachments, &client, &provider, &api_key, app_handle, self.id)
+            build_user_message_content(user_text, attachments, &client, &provider, &api_key, app_handle, self.id, "sqlagent")
                 .await;
         self.messages.push(json!({ "role": "user", "content": content }));
 
