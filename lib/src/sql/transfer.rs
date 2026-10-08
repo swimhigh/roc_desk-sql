@@ -96,6 +96,22 @@ fn parse_csv_line(line: &str) -> Vec<String> {
 pub enum TransferFormat {
     Csv,
     Json,
+    /// 导出成一组 `INSERT INTO` 语句（2026-10 需求）——不是另一种"数据格式"，
+    /// 是"导出的产物本身就能直接在另一个数据库/同一数据库的另一张表上重放"
+    /// 这个场景；只用于导出，`run_import` 没有对应分支（没人会把一份 SQL
+    /// 脚本当成"要导入的数据表"来解析，直接在 SQL 编辑器里跑这份脚本即可）。
+    Sql,
+}
+
+/// 和 `data_editor::quote_literal` 同一种"统一按字符串字面量拼"的取舍（那边
+/// 处理的是手动编辑表格的单个值，这里是批量导出，两处独立一份而不是互相
+/// 依赖，理由同 `quote_ident`/`quote_table` 旁边的注释）。
+fn cell_to_sql_literal(cell: &Cell) -> String {
+    if cell.is_null {
+        "NULL".to_string()
+    } else {
+        format!("'{}'", cell.text.replace('\'', "''"))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -340,6 +356,19 @@ async fn run_export(
                         .collect();
                     file.write_all(serde_json::to_string(&obj).unwrap_or_default().as_bytes())?;
                     wrote_any_json_row = true;
+                }
+            }
+            TransferFormat::Sql => {
+                let table = quote_table(kind, &object);
+                let quoted_cols = result
+                    .columns
+                    .iter()
+                    .map(|c| quote_ident(kind, &c.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                for row in &result.rows {
+                    let literals = row.iter().map(cell_to_sql_literal).collect::<Vec<_>>().join(", ");
+                    writeln!(file, "INSERT INTO {table} ({quoted_cols}) VALUES ({literals});")?;
                 }
             }
         }
