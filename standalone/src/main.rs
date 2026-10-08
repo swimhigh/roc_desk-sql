@@ -60,6 +60,36 @@ fn main() {
             roc_desk_sql::cmd::sql_import_poll,
             roc_desk_sql::cmd::sql_import_cancel,
             roc_desk_sql::cmd::sql_write_text_file,
+            // AI provider management.
+            roc_desk_sql::cmd::ai_provider_list,
+            roc_desk_sql::cmd::ai_provider_create,
+            roc_desk_sql::cmd::ai_provider_update,
+            roc_desk_sql::cmd::ai_provider_delete,
+            roc_desk_sql::cmd::ai_provider_list_models,
+            // SQL Agent.
+            roc_desk_sql::cmd::sql_agent_start,
+            roc_desk_sql::cmd::sql_agent_new_session,
+            roc_desk_sql::cmd::sql_agent_close,
+            roc_desk_sql::cmd::sql_agent_set_provider,
+            roc_desk_sql::cmd::sql_agent_send_message,
+            roc_desk_sql::cmd::sql_agent_cancel_turn,
+            roc_desk_sql::cmd::sql_agent_resolve_confirm,
+            roc_desk_sql::cmd::sql_agent_answer_question,
+            roc_desk_sql::cmd::sql_agent_history_list,
+            roc_desk_sql::cmd::sql_agent_history_get,
+            roc_desk_sql::cmd::sql_agent_history_save,
+            roc_desk_sql::cmd::sql_agent_history_resume,
+            roc_desk_sql::cmd::sql_agent_history_rename,
+            roc_desk_sql::cmd::sql_agent_history_delete,
+            // AI assist panel (generate/explain/optimize/fix-error) + change staging.
+            roc_desk_sql::cmd::sql_ai_generate,
+            roc_desk_sql::cmd::sql_ai_explain,
+            roc_desk_sql::cmd::sql_ai_optimize,
+            roc_desk_sql::cmd::sql_ai_fix_error,
+            roc_desk_sql::cmd::sql_accept_change,
+            roc_desk_sql::cmd::sql_reject_change,
+            roc_desk_sql::cmd::sql_undo_change,
+            roc_desk_sql::cmd::sql_revert_turn,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run standalone tool");

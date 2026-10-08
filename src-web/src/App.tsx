@@ -6,6 +6,7 @@ import { formatError } from "./utils/error";
 import { ThemeToggle } from "./components/shared/ThemeToggle";
 import { DataSourceManager } from "./components/SqlDesk/DataSourceManager";
 import { SqlWorkspace } from "./components/SqlDesk/SqlWorkspace";
+import { registerSqlAgentListeners } from "./stores/sqlAgentStore";
 
 /** SQL 工作台独立窗口顶层壳——没有选中数据源时展示数据源列表/向导，选中后
  * 展示两栏工作区。改自宿主 `SqlDeskShell.tsx`：这是独立 exe 自己的窗口，
@@ -23,6 +24,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     loadDataSources().catch((e) => push("error", `加载数据源失败：${formatError(e)}`));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    registerSqlAgentListeners().then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
   }, []);
 
   const currentDataSource = dataSources.find((d) => d.id === currentDataSourceId) ?? null;

@@ -3,10 +3,12 @@
 // 因为这个仓库还没接 ts-rs），字段名/枚举 tag 命名逐一和宿主
 // src-web/src/types/bindings.ts 里对应的 SQL 部分核对过，保持一致。
 //
-// 注意：宿主那份 bindings.ts 里 SQL 相关类型下方还有 FileChange/FileSyncInfo/
-// SQL Agent 相关的类型——这些依赖的命令（sql_ai_*/sql_accept_change/
-// sql_agent_*）后端压根没实现（AI 助手功能待 core::ai 落地后跟进），这里
-// 故意不包含，避免前端引用到不存在的命令。
+// AI Provider/SQL Agent/ChangeStore 相关类型（见本文件下方）对应的命令
+// （ai_provider_*/sql_agent_*/sql_ai_*/sql_accept_change 等）已经在阶段三
+// 补齐（roc_desk_common::ai/change_store 落地之后）。`sql_ai_*`（生成/解释/
+// 优化/修复 SQL 的面板）后端命令存在，但宿主自己的前端从来没有接过对应
+// 界面（真实状况，不是这轮漏做）——所以这里也不补一个宿主自己都没有的
+// UI，只留 SQL Agent（多轮对话）这一条宿主确实在用的路径。
 
 export type AppErrorKind =
   | "Connection"
@@ -195,4 +197,115 @@ export interface TransferProgress {
   done: boolean;
   cancelled: boolean;
   error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// AI provider management (roc_desk_sql::cmd::ai_provider_*)
+// ---------------------------------------------------------------------------
+
+export interface AiProvider {
+  id: string;
+  name: string;
+  api_base: string;
+  api_key_ref: string | null;
+  model: string;
+  is_local: boolean;
+  wire_api: string;
+  reasoning_effort: string | null;
+  context_window_tokens: number | null;
+  created_at: string;
+}
+
+export interface AiProviderInput {
+  name: string;
+  api_base: string;
+  api_key: string | null;
+  model: string;
+  is_local: boolean;
+  wire_api: string;
+  reasoning_effort: string | null;
+  context_window_tokens: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// SQL Agent (roc_desk_sql::cmd::sql_agent_*) -- a smaller sibling of the AI
+// coding agent: no Plan/Build mode, no file Diff/Git/MCP/Skills, tool set is
+// just run_query/describe_table/list_objects/todo_write/question. Event
+// payload shapes are deliberately named `Coding*Event` here too (not
+// `SqlAgent*Event`) because the backend literally reuses `agent_llm`'s
+// generic emit helpers which don't know which tool is calling them -- the
+// event *names* (`sqlagent:tool-call-start` etc.) differ, the payload
+// shapes don't.
+// ---------------------------------------------------------------------------
+
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: TodoStatus;
+}
+
+export type ChatAttachment =
+  | { kind: "image"; name: string; mime: string; data_base64: string }
+  | { kind: "file"; name: string; content: string }
+  | { kind: "pdf"; name: string; data_base64: string };
+
+export interface SqlAgentSessionInfo {
+  id: string;
+  provider_id: string;
+  todos: TodoItem[];
+}
+
+export interface SqlAgentHistorySummary {
+  id: string;
+  title: string;
+  provider_id: string;
+  provider_label: string;
+  model: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SqlAgentHistoryDetail extends SqlAgentHistorySummary {
+  data_source_id: string;
+  timeline: unknown;
+}
+
+export interface CodingTodoUpdateEvent {
+  sessionId: string;
+  todos: TodoItem[];
+}
+
+export interface CodingQuestionRequestEvent {
+  sessionId: string;
+  requestId: string;
+  question: string;
+  options: string[];
+}
+
+export interface CodingToolCallEvent {
+  sessionId: string;
+  tool: string;
+  detail?: string | null;
+  output?: string | null;
+}
+
+export interface CodingAssistantNoteEvent {
+  sessionId: string;
+  text: string;
+  kind?: "model" | "status";
+}
+
+export interface CodingTokenUsageEvent {
+  sessionId: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface SqlAgentConfirmRequestEvent {
+  sessionId: string;
+  requestId: string;
+  sql: string;
 }

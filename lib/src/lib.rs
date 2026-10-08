@@ -57,21 +57,67 @@ pub struct SqlAppState {
     pub workspace_tabs: std::sync::Arc<db::repo::sql_workspace_tabs_repo::SqlWorkspaceTabsRepo>,
     pub workspace_cache: std::sync::Arc<sql::workspace_cache::SqlWorkspaceCache>,
     pub transfer_manager: std::sync::Arc<sql::transfer::TransferManager>,
+    /// AI provider management -- same pattern as `roc_desk_workspace::WorkspaceAppState`'s
+    /// field of the same name (a thin wrapper this tool needs its own copy
+    /// of, since `roc_desk_common::ai::AiProviderManager` has no opinion on
+    /// which tool owns the backing SQLite file/keyring entries).
+    pub ai_provider_manager: std::sync::Arc<roc_desk_common::ai::AiProviderManager>,
+    /// SQL Agent (multi-turn tool-calling chat) + AI generate/explain/
+    /// optimize/fix-error assist panel -- see `sql::agent`/`sql::ai_assistant`
+    /// module docs for what this tool deliberately didn't port from the
+    /// host's much larger AI coding agent (no MCP/permission-rules/Skills/
+    /// audit-log/evidence-cache: SQL Agent never runs shell commands).
+    pub sql_ai_assistant: std::sync::Arc<sql::ai_assistant::SqlAiAssistant>,
+    pub sql_agent_sessions:
+        std::sync::Arc<tokio::sync::RwLock<std::collections::HashMap<uuid::Uuid, std::sync::Arc<tokio::sync::Mutex<sql::agent::SqlAgentSession>>>>>,
+    pub sql_agent_cancel_tokens:
+        std::sync::Arc<std::sync::Mutex<std::collections::HashMap<uuid::Uuid, tokio_util::sync::CancellationToken>>>,
+    pub sql_agent_confirms: roc_desk_common::agent_confirm::CommandConfirmRegistry,
+    pub sql_agent_questions: roc_desk_common::agent_confirm::QuestionRegistry,
+    pub sql_agent_history: std::sync::Arc<sql::agent::history::SqlAgentHistoryRepo>,
+    /// AI-generated SQL staged for Diff/Accept/Reject/Undo before it
+    /// overwrites a tab's content -- `roc_desk_common::change_store::ChangeStore`,
+    /// the same primitive the AI coding agent uses, keyed by data source id.
+    /// Always `CodingTarget::Local` + no `GitCommitter` (SQL tabs are local
+    /// cache files, see `get_or_create_sql_change_store`), so unlike
+    /// `roc_desk-workspace` this tool never needs an SSH dependency at all.
+    pub sql_changes: std::sync::Arc<
+        tokio::sync::RwLock<
+            std::collections::HashMap<uuid::Uuid, std::sync::Arc<tokio::sync::Mutex<roc_desk_common::change_store::ChangeStore>>>,
+        >,
+    >,
 }
 
 #[cfg(feature = "business")]
 impl SqlAppState {
     /// `db_path` is this tool's own SQLite file (data sources / query
-    /// history / workspace tab metadata); `cache_root` is the directory the
-    /// per-data-source `.sql` tab cache is created under (a `sql/` subdir is
-    /// appended, mirroring the host's `SqlWorkspaceCache::new`).
+    /// history / workspace tab metadata / AI provider configs / SQL Agent
+    /// history); `cache_root` is the directory the per-data-source `.sql`
+    /// tab cache is created under (a `sql/` subdir is appended, mirroring
+    /// the host's `SqlWorkspaceCache::new`).
     pub fn new(db_path: &std::path::Path, cache_root: std::path::PathBuf) -> Result<Self, error::AppError> {
         let pool = db::open(db_path)?;
         let credential_store: std::sync::Arc<dyn credential::CredentialStore> =
             std::sync::Arc::new(credential::KeyringStore);
         let repo = std::sync::Arc::new(db::repo::sql_data_sources_repo::SqlDataSourcesRepo::new(pool.clone()));
-        let data_source_service = std::sync::Arc::new(sql::service::SqlDataSourceService::new(repo, credential_store));
+        let data_source_service = std::sync::Arc::new(sql::service::SqlDataSourceService::new(repo, credential_store.clone()));
         let session_manager = std::sync::Arc::new(sql::service::SqlSessionManager::new(data_source_service.clone()));
+
+        let ai_providers_repo = std::sync::Arc::new(roc_desk_common::ai::AiProvidersRepo::new(pool.clone()));
+        ai_providers_repo.ensure_schema()?;
+        let ai_provider_manager = std::sync::Arc::new(roc_desk_common::ai::AiProviderManager::new(
+            ai_providers_repo,
+            credential_store,
+        ));
+
+        let sql_agent_history = std::sync::Arc::new(sql::agent::history::SqlAgentHistoryRepo::new(pool.clone()));
+        sql_agent_history.ensure_schema()?;
+
+        let sql_ai_assistant = std::sync::Arc::new(sql::ai_assistant::SqlAiAssistant::new(
+            std::sync::Arc::new(roc_desk_common::ai::AiChatClient::new()),
+            ai_provider_manager.clone(),
+        ));
+
         Ok(Self {
             data_source_service,
             session_manager,
@@ -80,6 +126,14 @@ impl SqlAppState {
             workspace_tabs: std::sync::Arc::new(db::repo::sql_workspace_tabs_repo::SqlWorkspaceTabsRepo::new(pool)),
             workspace_cache: std::sync::Arc::new(sql::workspace_cache::SqlWorkspaceCache::new(cache_root)),
             transfer_manager: std::sync::Arc::new(sql::transfer::TransferManager::new()),
+            ai_provider_manager,
+            sql_ai_assistant,
+            sql_agent_sessions: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            sql_agent_cancel_tokens: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            sql_agent_confirms: roc_desk_common::agent_confirm::CommandConfirmRegistry::default(),
+            sql_agent_questions: roc_desk_common::agent_confirm::QuestionRegistry::default(),
+            sql_agent_history,
+            sql_changes: std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         })
     }
 }
@@ -101,12 +155,20 @@ pub mod cmd {
 
     use crate::error::AppError;
     use crate::sql::adapter::{new_backend_handle_slot, AdapterSession};
+    use crate::sql::agent::history::{SqlAgentHistoryDetail, SqlAgentHistoryInput, SqlAgentHistorySummary};
+    use crate::sql::agent::SqlAgentSession;
     use crate::sql::data_editor::{self, AlterOp, CellInput, NamedCell};
     use crate::sql::model::*;
     use crate::sql::policy::{self, ExecutionKind};
     use crate::sql::registry;
     use crate::sql::transfer::{TransferFormat, TransferProgress};
     use crate::SqlAppState;
+    use roc_desk_common::ai::attachments::ChatAttachment;
+    use roc_desk_common::ai::{AiProvider, AiProviderInput};
+    use roc_desk_common::change_store::{ChangeStore, CodingTarget, FileChange, FileSyncInfo};
+    use roc_desk_common::fsops::local::LocalFileOps;
+    use roc_desk_common::fsops::FileOps;
+    use tokio::sync::Mutex as AsyncMutex;
 
     fn require_writable(profile: &DataSourceProfile) -> Result<(), AppError> {
         if profile.readonly {
@@ -737,5 +799,358 @@ pub mod cmd {
     pub async fn sql_write_text_file(path: String, content: String) -> Result<(), AppError> {
         tokio::fs::write(&path, content).await?;
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // AI provider management -- thin CRUD wrappers over
+    // `roc_desk_common::ai::AiProviderManager`, this tool's own copy of the
+    // same commands `roc_desk-workspace` registers (the host's equivalents
+    // live in `commands/ai.rs`, shared by every AI feature there; each
+    // standalone tool needs its own since there's no shared host `AppState`).
+    // -----------------------------------------------------------------------
+
+    #[tauri::command]
+    pub async fn ai_provider_list(state: State<'_, SqlAppState>) -> Result<Vec<AiProvider>, AppError> {
+        state.ai_provider_manager.list()
+    }
+
+    #[tauri::command]
+    pub async fn ai_provider_create(state: State<'_, SqlAppState>, input: AiProviderInput) -> Result<AiProvider, AppError> {
+        state.ai_provider_manager.create(input).await
+    }
+
+    #[tauri::command]
+    pub async fn ai_provider_update(state: State<'_, SqlAppState>, id: Uuid, input: AiProviderInput) -> Result<AiProvider, AppError> {
+        state.ai_provider_manager.update(id, input).await
+    }
+
+    #[tauri::command]
+    pub async fn ai_provider_delete(state: State<'_, SqlAppState>, id: Uuid) -> Result<(), AppError> {
+        state.ai_provider_manager.delete(id).await
+    }
+
+    #[tauri::command]
+    pub async fn ai_provider_list_models(state: State<'_, SqlAppState>, id: Uuid) -> Result<Vec<String>, AppError> {
+        state.ai_provider_manager.list_models(id).await
+    }
+
+    // -----------------------------------------------------------------------
+    // SQL Agent -- multi-turn tool-calling chat (run_query/describe_table/
+    // list_objects/todo_write/question). See `sql::agent::session`'s module
+    // doc for how this differs from the AI coding agent.
+    // -----------------------------------------------------------------------
+
+    #[derive(Serialize)]
+    pub struct SqlAgentSessionInfo {
+        pub id: Uuid,
+        pub provider_id: Uuid,
+        pub todos: Vec<crate::sql::agent::tools::TodoItem>,
+    }
+
+    async fn sql_agent_session_info(session: &SqlAgentSession) -> SqlAgentSessionInfo {
+        SqlAgentSessionInfo { id: session.id, provider_id: session.provider_id, todos: session.todos.clone() }
+    }
+
+    async fn get_sql_agent_session(
+        state: &State<'_, SqlAppState>,
+        data_source_id: Uuid,
+    ) -> Result<Arc<AsyncMutex<SqlAgentSession>>, AppError> {
+        state
+            .sql_agent_sessions
+            .read()
+            .await
+            .get(&data_source_id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("sql agent session not started: {data_source_id}")))
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_start(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        provider_id: Uuid,
+    ) -> Result<SqlAgentSessionInfo, AppError> {
+        if state.ai_provider_manager.get(provider_id)?.is_none() {
+            return Err(AppError::NotFound(format!("ai provider not found: {provider_id}")));
+        }
+        if let Some(existing) = state.sql_agent_sessions.read().await.get(&data_source_id).cloned() {
+            let mut guard = existing.lock().await;
+            if state.ai_provider_manager.get(guard.provider_id)?.is_some() {
+                return Ok(sql_agent_session_info(&guard).await);
+            }
+            guard.provider_id = provider_id;
+            return Ok(sql_agent_session_info(&guard).await);
+        }
+        let profile = require_data_source(&state, data_source_id)?;
+        let session = SqlAgentSession::new(data_source_id, provider_id, &profile.name, profile.db_kind);
+        let info = sql_agent_session_info(&session).await;
+        state.sql_agent_sessions.write().await.insert(data_source_id, Arc::new(AsyncMutex::new(session)));
+        Ok(info)
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_new_session(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        provider_id: Uuid,
+    ) -> Result<SqlAgentSessionInfo, AppError> {
+        if state.ai_provider_manager.get(provider_id)?.is_none() {
+            return Err(AppError::NotFound(format!("ai provider not found: {provider_id}")));
+        }
+        state.sql_agent_sessions.write().await.remove(&data_source_id);
+        let profile = require_data_source(&state, data_source_id)?;
+        let session = SqlAgentSession::new(data_source_id, provider_id, &profile.name, profile.db_kind);
+        let info = sql_agent_session_info(&session).await;
+        state.sql_agent_sessions.write().await.insert(data_source_id, Arc::new(AsyncMutex::new(session)));
+        Ok(info)
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_close(state: State<'_, SqlAppState>, data_source_id: Uuid) -> Result<(), AppError> {
+        state.sql_agent_sessions.write().await.remove(&data_source_id);
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_set_provider(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        provider_id: Uuid,
+    ) -> Result<(), AppError> {
+        if state.ai_provider_manager.get(provider_id)?.is_none() {
+            return Err(AppError::NotFound(format!("ai provider not found: {provider_id}")));
+        }
+        let session = get_sql_agent_session(&state, data_source_id).await?;
+        session.lock().await.provider_id = provider_id;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_send_message(
+        state: State<'_, SqlAppState>,
+        app_handle: tauri::AppHandle,
+        data_source_id: Uuid,
+        text: String,
+        attachments: Option<Vec<ChatAttachment>>,
+    ) -> Result<String, AppError> {
+        let session = get_sql_agent_session(&state, data_source_id).await?;
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        state.sql_agent_cancel_tokens.lock().unwrap().insert(data_source_id, cancel_token.clone());
+        let mut session = session.lock().await;
+        let result = session
+            .send_message(
+                &text,
+                &attachments.unwrap_or_default(),
+                &state.ai_provider_manager,
+                &state.data_source_service,
+                &state.session_manager,
+                &state.query_history,
+                &state.sql_agent_confirms,
+                &state.sql_agent_questions,
+                &app_handle,
+                &cancel_token,
+            )
+            .await;
+        state.sql_agent_cancel_tokens.lock().unwrap().remove(&data_source_id);
+        result
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_cancel_turn(state: State<'_, SqlAppState>, data_source_id: Uuid) -> Result<(), AppError> {
+        if let Some(token) = state.sql_agent_cancel_tokens.lock().unwrap().get(&data_source_id) {
+            token.cancel();
+        }
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_resolve_confirm(state: State<'_, SqlAppState>, request_id: Uuid, allow: bool) -> Result<(), AppError> {
+        state.sql_agent_confirms.resolve(request_id, allow).await;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_answer_question(state: State<'_, SqlAppState>, request_id: Uuid, answer: String) -> Result<(), AppError> {
+        state.sql_agent_questions.resolve(request_id, answer).await;
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub fn sql_agent_history_list(state: State<'_, SqlAppState>, data_source_id: Uuid) -> Result<Vec<SqlAgentHistorySummary>, AppError> {
+        state.sql_agent_history.list(data_source_id)
+    }
+
+    #[tauri::command]
+    pub fn sql_agent_history_get(state: State<'_, SqlAppState>, id: Uuid) -> Result<Option<SqlAgentHistoryDetail>, AppError> {
+        state.sql_agent_history.get(id)
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_history_save(state: State<'_, SqlAppState>, input: SqlAgentHistoryInput) -> Result<(), AppError> {
+        let mut input = input;
+        if let Some(session) = state.sql_agent_sessions.read().await.get(&input.data_source_id).cloned() {
+            let messages = session.lock().await.messages_snapshot();
+            input.messages = serde_json::to_value(&messages).unwrap_or_default();
+        }
+        state.sql_agent_history.save(&input)
+    }
+
+    #[tauri::command]
+    pub async fn sql_agent_history_resume(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        history_id: Uuid,
+    ) -> Result<SqlAgentSessionInfo, AppError> {
+        let detail = state
+            .sql_agent_history
+            .get(history_id)?
+            .ok_or_else(|| AppError::NotFound(format!("history not found: {history_id}")))?;
+        if detail.data_source_id != data_source_id {
+            return Err(AppError::Internal("这条历史记录不属于当前数据源".into()));
+        }
+        if state.ai_provider_manager.get(detail.summary.provider_id)?.is_none() {
+            return Err(AppError::NotFound(
+                "这条历史记录关联的 AI 供应商已被删除，请先在模型管理里重新配置后再试".into(),
+            ));
+        }
+        let profile = require_data_source(&state, data_source_id)?;
+        let mut session = SqlAgentSession::new(data_source_id, detail.summary.provider_id, &profile.name, profile.db_kind);
+        session.id = history_id;
+        let messages: Vec<serde_json::Value> = serde_json::from_value(detail.messages.clone()).unwrap_or_default();
+        session.restore_messages(messages);
+
+        let info = sql_agent_session_info(&session).await;
+        state.sql_agent_sessions.write().await.insert(data_source_id, Arc::new(AsyncMutex::new(session)));
+        Ok(info)
+    }
+
+    #[tauri::command]
+    pub fn sql_agent_history_rename(state: State<'_, SqlAppState>, id: Uuid, title: String) -> Result<(), AppError> {
+        state.sql_agent_history.rename(id, title.trim())
+    }
+
+    #[tauri::command]
+    pub fn sql_agent_history_delete(state: State<'_, SqlAppState>, id: Uuid) -> Result<(), AppError> {
+        state.sql_agent_history.delete(id)
+    }
+
+    // -----------------------------------------------------------------------
+    // AI assist panel (generate/explain/optimize/fix-error) -- generate/
+    // optimize/fix stage their result through `ChangeStore` (Diff/Accept/
+    // Reject/Undo, same gate manual SQL edits never go through); explain
+    // just returns text. Always `CodingTarget::Local` -- a SQL tab is a
+    // local cache file (`SqlWorkspaceCache`), never a remote target, so
+    // unlike `roc_desk-workspace` this tool never needs a `GitCommitter`.
+    // -----------------------------------------------------------------------
+
+    async fn get_or_create_sql_change_store(state: &State<'_, SqlAppState>, data_source_id: Uuid) -> Arc<AsyncMutex<ChangeStore>> {
+        if let Some(store) = state.sql_changes.read().await.get(&data_source_id) {
+            return store.clone();
+        }
+        let workspace_root = state.workspace_cache.data_source_root(data_source_id).to_string_lossy().to_string();
+        let file_ops: Arc<dyn FileOps> = Arc::new(LocalFileOps);
+        let store = Arc::new(AsyncMutex::new(ChangeStore::new(data_source_id, workspace_root, CodingTarget::Local, file_ops, false)));
+        state.sql_changes.write().await.insert(data_source_id, store.clone());
+        store
+    }
+
+    async fn stage_ai_result(
+        state: &State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        tab_id: Uuid,
+        new_sql: String,
+    ) -> Result<FileChange, AppError> {
+        let tab = state
+            .workspace_tabs
+            .get(tab_id)?
+            .ok_or_else(|| AppError::NotFound(format!("tab not found: {tab_id}")))?;
+        let abs_path = state.workspace_cache.guard_path(data_source_id, &tab.file_path)?.to_string_lossy().to_string();
+        let store = get_or_create_sql_change_store(state, data_source_id).await;
+        let mut guard = store.lock().await;
+        let (change, _sync, _commit) = guard.stage(&abs_path, new_sql, Uuid::new_v4()).await?;
+        Ok(change)
+    }
+
+    #[tauri::command]
+    pub async fn sql_ai_generate(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        tab_id: Uuid,
+        provider_id: Uuid,
+        instruction: String,
+        schema_context: String,
+        current_sql: String,
+    ) -> Result<FileChange, AppError> {
+        let sql = state.sql_ai_assistant.generate_sql(provider_id, &instruction, &schema_context, &current_sql).await?;
+        stage_ai_result(&state, data_source_id, tab_id, sql).await
+    }
+
+    #[tauri::command]
+    pub async fn sql_ai_explain(
+        state: State<'_, SqlAppState>,
+        provider_id: Uuid,
+        sql: String,
+        schema_context: String,
+    ) -> Result<String, AppError> {
+        state.sql_ai_assistant.explain_sql(provider_id, &sql, &schema_context).await
+    }
+
+    #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn sql_ai_optimize(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        tab_id: Uuid,
+        provider_id: Uuid,
+        sql: String,
+        explain_output: Option<String>,
+        schema_context: String,
+    ) -> Result<FileChange, AppError> {
+        let optimized = state.sql_ai_assistant.optimize_sql(provider_id, &sql, explain_output.as_deref(), &schema_context).await?;
+        stage_ai_result(&state, data_source_id, tab_id, optimized).await
+    }
+
+    #[tauri::command]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn sql_ai_fix_error(
+        state: State<'_, SqlAppState>,
+        data_source_id: Uuid,
+        tab_id: Uuid,
+        provider_id: Uuid,
+        sql: String,
+        error_message: String,
+        schema_context: String,
+    ) -> Result<FileChange, AppError> {
+        let fixed = state.sql_ai_assistant.fix_error(provider_id, &sql, &error_message, &schema_context).await?;
+        stage_ai_result(&state, data_source_id, tab_id, fixed).await
+    }
+
+    #[tauri::command]
+    pub async fn sql_accept_change(state: State<'_, SqlAppState>, data_source_id: Uuid, change_id: Uuid) -> Result<FileSyncInfo, AppError> {
+        let store = get_or_create_sql_change_store(&state, data_source_id).await;
+        let mut guard = store.lock().await;
+        let (sync, _commit) = guard.accept(change_id).await?;
+        Ok(sync)
+    }
+
+    #[tauri::command]
+    pub async fn sql_reject_change(state: State<'_, SqlAppState>, data_source_id: Uuid, change_id: Uuid) -> Result<(), AppError> {
+        let store = get_or_create_sql_change_store(&state, data_source_id).await;
+        let mut guard = store.lock().await;
+        guard.reject(change_id)
+    }
+
+    #[tauri::command]
+    pub async fn sql_undo_change(state: State<'_, SqlAppState>, data_source_id: Uuid, change_id: Uuid) -> Result<FileSyncInfo, AppError> {
+        let store = get_or_create_sql_change_store(&state, data_source_id).await;
+        let mut guard = store.lock().await;
+        guard.undo(change_id).await
+    }
+
+    #[tauri::command]
+    pub async fn sql_revert_turn(state: State<'_, SqlAppState>, data_source_id: Uuid, turn_id: Uuid) -> Result<Vec<FileSyncInfo>, AppError> {
+        let store = get_or_create_sql_change_store(&state, data_source_id).await;
+        let mut guard = store.lock().await;
+        guard.revert_turn(turn_id).await
     }
 }
