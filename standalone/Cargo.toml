@@ -9,6 +9,11 @@ roc_desk_sql = { path = "../lib" }
 roc_desk_core = { git = "https://github.com/swimhigh/roc_desk-common", package = "roc_desk_core", tag = "common-v0.13.0" }
 tauri = { version = "2", features = ["wry"] }
 tauri-plugin-dialog = "2"
+# Windows 文件关联（"打开方式"/双击已关联的 .sql 文件）：资源管理器把文件路径
+# 拼进 argv 启动一个新进程，这个插件负责在已有窗口实例跑着的时候把新进程的 argv
+# 转发给它而不是真的再开一个窗口（和 host roc_desk.exe 同一套机制，见
+# roc_desk/src-tauri/src/lib.rs 顶部注释）。
+tauri-plugin-single-instance = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
