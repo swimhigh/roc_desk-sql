@@ -2,6 +2,39 @@
 
 use tauri::Manager;
 
+/// See the identical helper in `roc_desk-ssh/standalone/src/main.rs` for the
+/// full rationale -- if `table_name` already exists (this db file was
+/// created by the full `roc_desk.exe` host's own migration set under a
+/// different name), record `migration_name` as already-applied so this
+/// crate's own migration doesn't try to re-run its `CREATE TABLE` against a
+/// table that's already there.
+fn bridge_migration_if_table_exists(
+    db_path: &std::path::Path,
+    migration_name: &str,
+    table_name: &str,
+) -> Result<(), roc_desk_core::error::AppError> {
+    let pool = roc_desk_core::db::pool::create_pool(db_path)?;
+    let conn = pool.get()?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+            name TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );",
+    )?;
+    let table_exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [table_name],
+        |r| r.get(0),
+    )?;
+    if table_exists {
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (name) VALUES (?1)",
+            [migration_name],
+        )?;
+    }
+    Ok(())
+}
+
 fn main() {
     // The main window is declared once in tauri.conf.json.
     tauri::Builder::default()
@@ -15,7 +48,13 @@ fn main() {
             // them share it automatically.
             let app_data_dir =
                 roc_desk_core::paths::portable_data_dir().expect("resolve app data dir");
-            let db_path = app_data_dir.join("roc_desk_sql.db");
+            // Same file the host's SQL desktop module reads/writes
+            // (`roc_desk.db`, its main db -- see host `src-tauri/src/lib.rs`),
+            // not a separate `roc_desk_sql.db` of this exe's own, so data
+            // sources/query history saved in either place show up in both.
+            let db_path = app_data_dir.join("roc_desk.db");
+            bridge_migration_if_table_exists(&db_path, "0001_sql_desktop", "sql_data_sources")
+                .expect("bridge legacy roc_desk.db migration state");
             let state = roc_desk_sql::SqlAppState::new(&db_path, app_data_dir)
                 .expect("initialize SQL tool state");
             app.manage(state);
