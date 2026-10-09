@@ -177,6 +177,7 @@ async fn run_query_on_conn(
         rows_affected,
         truncated,
         duration_ms: start.elapsed().as_millis() as u64,
+        statements: None,
     })
 }
 
@@ -344,6 +345,7 @@ impl AdapterSession for MySqlSession {
             rows_affected: None,
             truncated: false,
             duration_ms: 0,
+            statements: None,
         })
     }
 

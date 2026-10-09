@@ -202,6 +202,16 @@ pub struct ExecuteResult {
     pub rows_affected: Option<u64>,
     pub truncated: bool,
     pub duration_ms: u64,
+    /// 只有"一次运行多条只读语句"（`policy::parse_statements` 解出多条、且
+    /// 全部通过 `statement_allows_readonly` 时，见 `lib.rs::sql_execute`）
+    /// 才会是 `Some`：按语句顺序排列的每条各自的结果集。顶层的
+    /// `columns`/`rows`/`rows_affected` 这时候固定等于最后一条语句的结果
+    /// （兼容"结果区默认展示最后一个结果"这个单语句时代就有的行为，旧版
+    /// 前端/这个字段出现之前写的代码不用改）；前端检测到这个字段非空时，
+    /// 改成把每条语句的结果各自渲染一个结果格（docs 里用户要求的
+    /// "多条 SQL 一次运行，分别展示结果"）。单语句执行（绝大多数情况）
+    /// 这个字段恒为 `None`。
+    pub statements: Option<Vec<ExecuteResult>>,
 }
 
 /// 待确认的写操作（UPDATE/DELETE 等支持事务回滚的语句）——已经在一个独立

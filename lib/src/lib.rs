@@ -489,6 +489,51 @@ pub mod cmd {
         confirmed: bool,
     ) -> Result<ExecuteOutcome, AppError> {
         let profile = require_data_source(&state, data_source_id)?;
+
+        // "一次运行多条语句"（2026-10 用户反馈：选中/粘贴了多条 SELECT 一起跑，
+        // 和 DBeaver/Navicat 这类工具一样希望每条各自出一份结果，而不是直接
+        // 报错让人逐条拆开）——只在"解析出不止一条、且每一条都是明确只读的
+        // 查询"这个前提下放行批量执行；只要有一条不是单纯的 SELECT/EXPLAIN
+        // （写操作、DDL，哪怕只是分类不出来的未知语句），就整体拒绝，保留
+        // `policy::parse_single_statement` 文档注释里说的那个理由："多语句
+        // 一次提交无法给出单一、明确的确认/回滚粒度"——这个理由对写操作依然
+        // 成立，只是对纯只读查询不成立（只读语句没有"确认/回滚粒度"这个问题，
+        // 失败了也不会留下部分提交的脏状态）。
+        let parsed_statements = policy::parse_statements(&sql, profile.db_kind)?;
+        if parsed_statements.len() > 1 {
+            // 批量执行只放行"每一条都是只读查询"这一种情况——`profile.readonly`
+            // （数据源级别的只读开关）在这里不需要单独判断，纯只读语句批量本来
+            // 就满足任何只读限制，`statement_allows_readonly` 这条逐句检查已经
+            // 覆盖了全部需要拒绝的场景。
+            let all_readonly = parsed_statements.iter().all(statement_allows_readonly);
+            if !all_readonly {
+                return Err(AppError::Internal(
+                    "一次只能运行多条语句，但其中包含非只读语句（写操作/DDL），请拆分后逐条执行；多条 SELECT/EXPLAIN 一起运行是支持的".into(),
+                ));
+            }
+            let session = open_session(&state, data_source_id).await?;
+            record_history(&state, data_source_id, &sql, "started", None, None, None);
+            let statement_sqls: Vec<String> = parsed_statements.iter().map(|s| s.to_string()).collect();
+            let query_id = state.executor.spawn_with_backend_handle(move |slot| {
+                let session = session.clone();
+                async move {
+                    let mut results = Vec::with_capacity(statement_sqls.len());
+                    for stmt_sql in &statement_sqls {
+                        let result = session.execute_sql(stmt_sql, 1000, slot.clone()).await?;
+                        results.push(result);
+                    }
+                    // 顶层字段镜像最后一条语句的结果——兼容"结果区默认展示
+                    // 顶层 columns/rows"这个 `statements` 字段出现之前就有的
+                    // 行为；前端检测到 `statements` 非空时会改成把每条语句的
+                    // 结果各自渲染一个结果格，不会再去读顶层这几个字段。
+                    let mut combined = results.last().cloned().expect("checked non-empty above");
+                    combined.statements = Some(results);
+                    Ok(combined)
+                }
+            });
+            return Ok(ExecuteOutcome::Started { query_id });
+        }
+
         let (statement, execution_kind) = policy::parse_and_classify(&sql, profile.db_kind)?;
 
         if profile.readonly && !statement_allows_readonly(&statement) {

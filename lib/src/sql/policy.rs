@@ -46,6 +46,21 @@ fn parse_single_statement(sql: &str, kind: DbKind) -> Result<Statement, AppError
     }
 }
 
+/// 不限制条数地解析——供 `lib.rs::sql_execute` 判断"这是不是一次选中/运行了
+/// 多条语句"用。和 `parse_single_statement` 唯一的区别就是不对 `len()` 做
+/// 限制；多语句一旦真的要执行，`sql_execute` 还会再逐条跑一遍
+/// `statement_allows_readonly` 这层更严格的检查（只允许全部是只读查询才放行
+/// 批量执行，见该函数顶部注释），这里只负责"解析成功"这一步。
+pub fn parse_statements(sql: &str, kind: DbKind) -> Result<Vec<Statement>, AppError> {
+    let dialect = dialect_for(kind);
+    let statements = Parser::parse_sql(&*dialect, sql)
+        .map_err(|e| AppError::Internal(format!("SQL 解析失败：{e}")))?;
+    if statements.is_empty() {
+        return Err(AppError::Internal("SQL 内容为空".into()));
+    }
+    Ok(statements)
+}
+
 /// 语句分类失败（解析失败、遇到未识别的语句类型）一律降级为 `Confirm`，
 /// 不放行——docs/SQL_DESKTOP_PLAN.md §7 明确要求"解析失败或分类未知一律
 /// 降级为需要确认"，绝不能因为分类器不认识某个语句就当作 `Normal` 直接跑。

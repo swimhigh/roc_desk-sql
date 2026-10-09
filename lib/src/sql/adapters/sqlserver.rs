@@ -214,6 +214,7 @@ async fn run_query_on_conn(
             rows_affected: None,
             truncated,
             duration_ms: start.elapsed().as_millis() as u64,
+            statements: None,
         })
     } else {
         let result = client.execute(sql, &[]).await.map_err(to_app_err)?;
@@ -224,6 +225,7 @@ async fn run_query_on_conn(
             rows_affected: Some(affected),
             truncated: false,
             duration_ms: start.elapsed().as_millis() as u64,
+            statements: None,
         })
     }
 }
@@ -427,6 +429,7 @@ impl AdapterSession for SqlServerSession {
             rows_affected: None,
             truncated: false,
             duration_ms: 0,
+            statements: None,
         })
     }
 
