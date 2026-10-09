@@ -77,6 +77,14 @@
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
+/* 细滚动条（原样搬自宿主 globals.css）——不加这条规则，所有 overflow 容器
+   （编辑器 Tab 栏/结果表格/对象树等）都会退化成 Windows 原生的宽滚动条，
+   两头带上下/左右箭头按钮，和应用本身的深色界面格格不入。 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-default); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-disabled); }
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
